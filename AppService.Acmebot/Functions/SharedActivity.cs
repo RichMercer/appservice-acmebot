@@ -15,6 +15,8 @@ using AppService.Acmebot.Internal;
 using AppService.Acmebot.Models;
 using AppService.Acmebot.Options;
 
+using ClubPal.AcmeBot;
+
 using DnsClient;
 
 using Microsoft.Azure.Management.Dns;
@@ -38,7 +40,7 @@ namespace AppService.Acmebot.Functions
                               AcmeProtocolClientFactory acmeProtocolClientFactory, KuduClientFactory kuduClientFactory,
                               WebSiteManagementClient webSiteManagementClient, DnsManagementClient dnsManagementClient,
                               ResourceManagementClient resourceManagementClient, WebhookInvoker webhookInvoker, IOptions<AcmebotOptions> options,
-                              ILogger<SharedActivity> logger)
+                              ILogger<SharedActivity> logger, IAcmeBotService acmeBotService)
         {
             _httpClientFactory = httpClientFactory;
             _environment = environment;
@@ -51,6 +53,7 @@ namespace AppService.Acmebot.Functions
             _webhookInvoker = webhookInvoker;
             _options = options.Value;
             _logger = logger;
+            _acmeBotService = acmeBotService;
         }
 
         private readonly IHttpClientFactory _httpClientFactory;
@@ -64,6 +67,7 @@ namespace AppService.Acmebot.Functions
         private readonly WebhookInvoker _webhookInvoker;
         private readonly AcmebotOptions _options;
         private readonly ILogger<SharedActivity> _logger;
+        private readonly IAcmeBotService _acmeBotService;
 
         private const string IssuerName = "Acmebot";
 
@@ -573,5 +577,62 @@ namespace AppService.Acmebot.Functions
 
         private const string DefaultWebConfigPath = ".well-known/web.config";
         private const string DefaultWebConfig = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<configuration>\r\n  <system.webServer>\r\n    <handlers>\r\n      <clear />\r\n      <add name=\"StaticFile\" path=\"*\" verb=\"*\" modules=\"StaticFileModule\" resourceType=\"Either\" requireAccess=\"Read\" />\r\n    </handlers>\r\n    <staticContent>\r\n      <remove fileExtension=\".\" />\r\n      <mimeMap fileExtension=\".\" mimeType=\"text/plain\" />\r\n    </staticContent>\r\n    <rewrite>\r\n      <rules>\r\n        <clear />\r\n      </rules>\r\n    </rewrite>\r\n  </system.webServer>\r\n  <system.web>\r\n    <authorization>\r\n      <allow users=\"*\"/>\r\n    </authorization>\r\n  </system.web>\r\n</configuration>";
+
+        [FunctionName(nameof(ClubPalAuthorization))]
+        public async Task<IReadOnlyList<AcmeChallengeResult>> ClubPalAuthorization([ActivityTrigger] (Site, IReadOnlyList<string>) input)
+        {
+            var (site, authorizationUrls) = input;
+
+            var acmeProtocolClient = await _acmeProtocolClientFactory.CreateClientAsync();
+
+            var challengeResults = new List<AcmeChallengeResult>();
+
+            foreach (var authorizationUrl in authorizationUrls)
+            {
+                // Authorization の詳細を取得
+                var authorization = await acmeProtocolClient.GetAuthorizationDetailsAsync(authorizationUrl);
+
+                // HTTP-01 Challenge の情報を拾う
+                var challenge = authorization.Challenges.FirstOrDefault(x => x.Type == "http-01");
+
+                if (challenge == null)
+                {
+                    throw new InvalidOperationException("Simultaneous use of HTTP-01 and DNS-01 for authentication is not allowed.");
+                }
+
+                var challengeValidationDetails = AuthorizationDecoder.ResolveChallengeForHttp01(authorization, challenge, acmeProtocolClient.Signer);
+
+                // Challenge の情報を保存する
+                challengeResults.Add(new AcmeChallengeResult
+                {
+                    Url = challenge.Url,
+                    HttpResourceUrl = challengeValidationDetails.HttpResourceUrl,
+                    HttpResourcePath = challengeValidationDetails.HttpResourcePath,
+                    HttpResourceValue = challengeValidationDetails.HttpResourceValue
+                });
+            }
+
+            // 発行プロファイルを取得
+            var credentials = await _webSiteManagementClient.WebApps.ListPublishingCredentialsAsync(site);
+
+            var kuduClient = _kuduClientFactory.CreateClient(site.ScmSiteUrl(), credentials.PublishingUserName, credentials.PublishingPassword);
+
+            // Kudu API を使い、Answer 用のファイルを作成
+            foreach (var challengeResult in challengeResults)
+            {
+                await _acmeBotService.SaveChallengeAsync(challengeResult.HttpResourcePath, challengeResult.HttpResourceValue);
+            }
+
+            return challengeResults;
+        }
+
+        [FunctionName(nameof(CleanupClubPalChallenge))]
+        public async Task CleanupClubPalChallenge([ActivityTrigger] IReadOnlyList<AcmeChallengeResult> challengeResults)
+        {
+            foreach (var lookup in challengeResults.ToLookup(x => x.HttpResourcePath))
+            {
+                await _acmeBotService.DeleteChallenge(lookup.Key);
+            }
+        }
     }
 }

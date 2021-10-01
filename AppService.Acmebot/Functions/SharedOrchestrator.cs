@@ -23,10 +23,15 @@ namespace AppService.Acmebot.Functions
             var activity = context.CreateActivityProxy<ISharedActivity>();
 
             // ワイルドカード、コンテナ、Linux の場合は DNS-01 を利用する
+            var isCustomDomain = !dnsNames.Any(x => x.Contains("clubpal.") || x.Contains("entrypal."));
             var useDns01Auth = forceDns01Challenge || dnsNames.Any(x => x.StartsWith("*")) || site.Kind.Contains("container") || site.Kind.Contains("linux");
 
             // 前提条件をチェック
-            if (useDns01Auth)
+            if (isCustomDomain)
+            {
+                // Custom domains don't require the precondition as the Controller will handler the request
+            }
+            else if (useDns01Auth)
             {
                 await activity.Dns01Precondition(dnsNames);
             }
@@ -45,7 +50,14 @@ namespace AppService.Acmebot.Functions
                 IReadOnlyList<AcmeChallengeResult> challengeResults;
 
                 // ACME Challenge を実行
-                if (useDns01Auth)
+                if (isCustomDomain)
+                {
+                    // TODO: ClubPal function here that will save 
+                    challengeResults = await activity.ClubPalAuthorization((site, orderDetails.Payload.Authorizations));
+
+                    await activity.CheckHttpChallenge(challengeResults);
+                }
+                else if (useDns01Auth)
                 {
                     challengeResults = await activity.Dns01Authorization(orderDetails.Payload.Authorizations);
 
@@ -69,7 +81,11 @@ namespace AppService.Acmebot.Functions
                 // Order のステータスが ready になるまで 60 秒待機
                 await activity.CheckIsReady((orderDetails, challengeResults));
 
-                if (useDns01Auth)
+                if (isCustomDomain)
+                {
+                    await activity.CleanupClubPalChallenge(challengeResults);
+                }
+                else if (useDns01Auth)
                 {
                     // 作成した DNS レコードを削除
                     await activity.CleanupDnsChallenge(challengeResults);

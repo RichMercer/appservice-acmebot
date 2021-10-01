@@ -17,6 +17,7 @@
     <PackageReference Include="WebJobs.Extensions.HttpApi" Version="1.1.0" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\ClubPal\src\ClubPal.AcmeBot\ClubPal.AcmeBot.csproj" />
     <ProjectReference Include="..\ACMESharpCore\src\ACMESharp.DotNetCore\ACMESharp.DotNetCore.csproj" />
     <ProjectReference Include="..\ACMESharpCore\src\ACMESharp\ACMESharp.csproj" />
   </ItemGroup>
@@ -34,6 +35,10 @@
     <None Update="proxies.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Properties\PublishProfiles\" />
+    <Folder Include="Properties\ServiceDependencies\" />
   </ItemGroup>
   <Target Name="DeleteFiles" AfterTargets="Publish">
     <Delete Files="$(PublishDir)System.Reactive.xml" />

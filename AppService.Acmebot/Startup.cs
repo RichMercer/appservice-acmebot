@@ -5,6 +5,8 @@ using AppService.Acmebot;
 using AppService.Acmebot.Internal;
 using AppService.Acmebot.Options;
 
+using ClubPal.AcmeBot;
+
 using DnsClient;
 
 using Microsoft.ApplicationInsights.Extensibility;
@@ -109,6 +111,10 @@ namespace AppService.Acmebot
 
             builder.Services.AddSingleton<WebhookInvoker>();
             builder.Services.AddSingleton<ILifeCycleNotificationHelper, WebhookLifeCycleNotification>();
+
+            // ClubPal Custom
+            builder.Services.Configure<AcmeBotOptions>(context.Configuration.GetSection("AcmeBotOptions"));
+            builder.Services.AddScoped<IAcmeBotService, AcmeBotService>();
         }
     }
 }

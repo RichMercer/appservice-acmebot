@@ -59,5 +59,9 @@ namespace AppService.Acmebot.Functions
         Task CleanupDnsChallenge(IReadOnlyList<AcmeChallengeResult> challengeResults);
 
         Task SendCompletedEvent((Site, DateTime?, IReadOnlyList<string>) input);
+
+        Task<IReadOnlyList<AcmeChallengeResult>> ClubPalAuthorization((Site, IReadOnlyList<string>) input);
+
+        Task CleanupClubPalChallenge(IReadOnlyList<AcmeChallengeResult> challengeResults);
     }
 }
