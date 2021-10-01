@@ -1,24 +1,30 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
 
 using AppService.Acmebot.Options;
 
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+
+using Newtonsoft.Json;
 
 namespace AppService.Acmebot.Internal
 {
     public class WebhookInvoker
     {
-        public WebhookInvoker(IHttpClientFactory httpClientFactory, IOptions<AcmebotOptions> options)
+        public WebhookInvoker(IHttpClientFactory httpClientFactory, IOptions<AcmebotOptions> options, ILogger<WebhookInvoker> logger)
         {
             _httpClientFactory = httpClientFactory;
             _options = options.Value;
+            _logger = logger;
         }
 
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly AcmebotOptions _options;
+        private readonly ILogger<WebhookInvoker> _logger;
 
         public Task SendCompletedEventAsync(string appName, string slotName, DateTime? expirationDate, IEnumerable<string> dnsNames)
         {
@@ -69,12 +75,12 @@ namespace AppService.Acmebot.Internal
                     }
                 };
             }
-            else if (_options.Webhook.Contains("outlook.office.com"))
+            else if (_options.Webhook.Contains(".office.com"))
             {
                 model = new
                 {
-                    title = $"{appName} - {slotName}",
-                    text = string.Join("\n", dnsNames),
+                    title = "Acmebot",
+                    text = $"A new certificate has been issued.\n\n**App Name**: {appName}\n\n**Slot Name**: {slotName}\n\n**Expiration Date**: {expirationDate}\n\n**DNS Names**: {string.Join(", ", dnsNames)}",
                     themeColor = "2EB886"
                 };
             }
@@ -116,12 +122,12 @@ namespace AppService.Acmebot.Internal
                     }
                 };
             }
-            else if (_options.Webhook.Contains("outlook.office.com"))
+            else if (_options.Webhook.Contains(".office.com"))
             {
                 model = new
                 {
-                    title = functionName,
-                    text = reason,
+                    title = "Acmebot",
+                    text = $"**{functionName}**\n\n**Reason**\n\n{reason}",
                     themeColor = "A30200"
                 };
             }
@@ -141,7 +147,14 @@ namespace AppService.Acmebot.Internal
         {
             var httpClient = _httpClientFactory.CreateClient();
 
-            await httpClient.PostAsJsonAsync(_options.Webhook, model);
+            var content = new StringContent(JsonConvert.SerializeObject(model), Encoding.UTF8, "application/json");
+
+            var response = await httpClient.PostAsync(_options.Webhook, content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning($"Failed invoke webhook. Status Code = {response.StatusCode}, Reason = {await response.Content.ReadAsStringAsync()}");
+            }
         }
     }
 }
